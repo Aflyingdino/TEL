@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import importedLevels from './levels.json'
 
 const seedLevels = [
@@ -70,11 +70,18 @@ const seedLevels = [
   },
 ]
 
-const stored = localStorage.getItem('everything-list-levels-v4')
+const storageKey = 'everything-list-levels-v4'
+let storedLevels = null
+try {
+  const stored = localStorage.getItem(storageKey)
+  storedLevels = stored ? JSON.parse(stored) : null
+} catch {
+  localStorage.removeItem(storageKey)
+}
 const importedTopTen = [...importedLevels]
   .sort((a, b) => Number(a.rank) - Number(b.rank))
   .slice(0, 10)
-const levels = ref(stored ? JSON.parse(stored) : importedTopTen)
+const levels = ref(Array.isArray(storedLevels) ? storedLevels : importedTopTen)
 const page = ref('home')
 const selectedLevel = ref(null)
 const search = ref('')
@@ -101,7 +108,7 @@ const visibleLevels = computed(() => {
 })
 
 function save() {
-  localStorage.setItem('everything-list-levels-v4', JSON.stringify(levels.value))
+  localStorage.setItem(storageKey, JSON.stringify(levels.value))
   toast.value = 'List saved locally'
   window.setTimeout(() => (toast.value = ''), 2400)
 }
@@ -329,12 +336,59 @@ function startPointerDrag(level, event) {
   document.addEventListener('pointerup', pointerUp)
 }
 
+function handleDialogKeydown(event) {
+  const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+  const dialog = dialogs[dialogs.length - 1]
+  if (!dialog) return
+
+  if (event.key === 'Escape') {
+    if (editing.value) editing.value = null
+    else if (placementLevel.value) closePlacement()
+    else if (selectedLevel.value) closeLevel()
+    event.preventDefault()
+    return
+  }
+
+  if (event.key !== 'Tab') return
+  const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter((element) => element.offsetParent !== null)
+  if (!focusable.length) {
+    event.preventDefault()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (!dialog.contains(document.activeElement)) {
+    event.preventDefault()
+    first.focus()
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+watch([placementLevel, selectedLevel, editing], async () => {
+  await nextTick()
+  const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+  const dialog = dialogs[dialogs.length - 1]
+  dialog?.querySelector('button:not([disabled]), input:not([disabled]), textarea:not([disabled])')?.focus()
+})
+
+onMounted(() => {
+  document.addEventListener('keydown', handleDialogKeydown)
+})
+
 onBeforeUnmount(() => {
   if (dragFrame) window.cancelAnimationFrame(dragFrame)
   placementMiddleUp()
   if (placementWheelFrame) window.cancelAnimationFrame(placementWheelFrame)
   document.removeEventListener('pointermove', pointerMove)
   document.removeEventListener('pointerup', pointerUp)
+  document.removeEventListener('keydown', handleDialogKeydown)
 })
 </script>
 
@@ -415,7 +469,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="selectedLevel" class="drawer-backdrop" @click.self="closeLevel">
-      <article class="level-drawer">
+      <article class="level-drawer" role="dialog" aria-modal="true" aria-label="Level details">
         <button class="close-button" aria-label="Close level details" @click="closeLevel">×</button>
         <div class="detail-hero">
           <img v-if="thumbnailUrl(selectedLevel.video)" :src="thumbnailUrl(selectedLevel.video)" :alt="`${selectedLevel.name} thumbnail`" />
@@ -430,7 +484,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="editing" class="modal-backdrop" @click.self="editing = null">
-      <form class="edit-modal" @submit.prevent="saveLevel"><div class="modal-heading"><p class="eyebrow">List editor</p><button type="button" class="close-button" @click="editing = null">×</button><h2>{{ editing.name ? 'Edit level' : 'Add a level' }}</h2></div>
+      <form class="edit-modal" role="dialog" aria-modal="true" aria-label="Edit level" @submit.prevent="saveLevel"><div class="modal-heading"><p class="eyebrow">List editor</p><button type="button" class="close-button" @click="editing = null">×</button><h2>{{ editing.name ? 'Edit level' : 'Add a level' }}</h2></div>
         <div class="form-grid">
           <label>Level name<input v-model="editing.name" required /></label>
           <label>Creator<input v-model="editing.creator" required /></label>
